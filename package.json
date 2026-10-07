@@ -1,0 +1,31 @@
+{
+  "name": "analog-synth-memory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc --noEmit && vite build",
+    "build:mobile-local": "tsc --noEmit && vite build --mode mobile-local && cap sync android",
+    "test": "node --test tests/ai.test.mjs",
+    "preview": "vite preview --host 0.0.0.0",
+    "cap:add:android": "cap add android",
+    "cap:sync": "cap sync",
+    "cap:open:android": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.1.1",
+    "@capacitor/core": "^8.1.1",
+    "lucide-react": "^0.546.0",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.1.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "typescript": "^5.8.3",
+    "vite": "^8.3.0"
+  }
+}
