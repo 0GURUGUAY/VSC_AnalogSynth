@@ -1,16 +1,15 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core";
-import type { PanelAnalysis, PanelVisionAnalysis } from "./types";
+import type { JackDirection, PanelAnalysis, PanelVisionAnalysis } from "./types";
+import { isJackDirection, jackDirection } from "./ports";
 
 const maxControls = 64;
 const maxJacks = 40;
+const cloudRunUrl = "https://analog-memory-65609223509.us-central1.run.app";
 
 function analysisEndpoint(path = "/api/rings/analyze"): string {
-  const serverUrl = import.meta.env.VITE_AI_SERVER_URL?.trim();
+  const serverUrl = import.meta.env.VITE_AI_SERVER_URL?.trim() || import.meta.env.VITE_API_URL?.trim();
   if (!serverUrl) {
-    if (Capacitor.isNativePlatform()) {
-      throw new Error("Le serveur IA n’est pas configuré pour l’application mobile. Configure VITE_AI_SERVER_URL puis reconstruis et réinstalle l’APK.");
-    }
-    return path;
+    return Capacitor.isNativePlatform() ? `${cloudRunUrl}${path}` : path;
   }
   let url: URL;
   try {
@@ -68,7 +67,7 @@ function isVisionAnalysis(value: unknown): value is PanelVisionAnalysis {
   const analysis = value as Record<string, unknown>;
   if (typeof analysis.summary !== "string" || analysis.summary.length > 1200) return false;
   if (!isOptionalText(analysis.model, 80) || !isOptionalText(analysis.moduleName, 80) || !isOptionalText(analysis.manufacturer, 80)) return false;
-  if (!Array.isArray(analysis.controls) || analysis.controls.length === 0 || analysis.controls.length > maxControls) return false;
+  if (!Array.isArray(analysis.controls) || analysis.controls.length > maxControls) return false;
   if (!analysis.controls.every((estimate) => {
     if (typeof estimate !== "object" || estimate === null || Array.isArray(estimate)) return false;
     const candidate = estimate as Record<string, unknown>;
@@ -87,7 +86,7 @@ function isVisionAnalysis(value: unknown): value is PanelVisionAnalysis {
     if (typeof jack !== "object" || jack === null || Array.isArray(jack)) return false;
     const candidate = jack as Record<string, unknown>;
     return typeof candidate.label === "string" && candidate.label.trim().length > 0 && candidate.label.length <= 40
-      && (candidate.direction === "input" || candidate.direction === "output")
+      && isJackDirection(candidate.direction)
       && typeof candidate.confidence === "number"
       && Number.isFinite(candidate.confidence)
       && candidate.confidence >= 0
@@ -99,7 +98,7 @@ function slugify(label: string): string {
   return label.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "control";
 }
 
-export async function analyzePanelPhoto(photo: Blob): Promise<PanelAnalysis> {
+export async function analyzePanelPhoto(photo: Blob, token?: string): Promise<PanelAnalysis> {
   const mimeType = photo.type.toLowerCase();
   if (!["image/jpeg", "image/png", "image/webp"].includes(mimeType)) {
     throw new Error("Format photo non pris en charge. Choisis une image JPEG, PNG ou WebP.");
@@ -118,7 +117,7 @@ export async function analyzePanelPhoto(photo: Blob): Promise<PanelAnalysis> {
   const imageBase64 = dataUrl.split(",", 2)[1];
   if (!imageBase64) throw new Error("La photo n’a pas pu être préparée pour l’analyse.");
 
-  const result = await postJson(endpoint, { mimeType, imageBase64 });
+  const result = await postJson(endpoint, { mimeType, imageBase64 }, 70_000, token);
   if (!isVisionAnalysis(result)) throw new Error("Gemini a renvoyé des angles ou des réglages illisibles. Réessaie avec une photo plus nette.");
   const vision = result;
   const usedIds = new Set<string>();
@@ -143,13 +142,13 @@ export async function analyzePanelPhoto(photo: Blob): Promise<PanelAnalysis> {
     jacks: vision.jacks.map((jack, index) => ({
       id: `${slugify(jack.label)}-${index + 1}`,
       label: jack.label.trim(),
-      direction: jack.direction,
+      direction: jackDirection(jack),
       confidence: jack.confidence,
     })),
   };
 }
 
-async function postJson(endpoint: string, payload: unknown, timeoutMs = 70_000): Promise<unknown> {
+async function postJson(endpoint: string, payload: unknown, timeoutMs = 70_000, token?: string): Promise<unknown> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -159,7 +158,7 @@ async function postJson(endpoint: string, payload: unknown, timeoutMs = 70_000):
       try {
         response = await CapacitorHttp.post({
           url: endpoint,
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
           data: payload,
           responseType: "text",
           connectTimeout: 10_000,
@@ -173,7 +172,7 @@ async function postJson(endpoint: string, payload: unknown, timeoutMs = 70_000):
     }
     const response = await fetch(endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
@@ -191,13 +190,13 @@ async function postJson(endpoint: string, payload: unknown, timeoutMs = 70_000):
   }
 }
 
-export type HiddenJack = { label: string; direction: "input" | "output"; location: string };
+export type HiddenJack = { label: string; direction: JackDirection; location: string };
 
 /** Recherche (via l'IA + web) les connecteurs absents de la façade : face arrière, côtés, MIDI IN/OUT/THRU, USB, etc. */
-export async function findHiddenJacks(device: { moduleName: string | null; manufacturer: string | null; visibleJacks: string[] }): Promise<HiddenJack[]> {
+export async function findHiddenJacks(device: { moduleName: string | null; manufacturer: string | null; visibleJacks: string[] }, token?: string): Promise<HiddenJack[]> {
   const name = [device.manufacturer, device.moduleName].filter(Boolean).join(" ").trim();
   if (!name) return [];
-  const result = await postJson(analysisEndpoint("/api/rings/hidden-jacks"), { ...device, name }, 70_000);
+  const result = await postJson(analysisEndpoint("/api/rings/hidden-jacks"), { ...device, name }, 70_000, token);
   const jacks = typeof result === "object" && result !== null && "jacks" in result ? result.jacks : null;
   if (!Array.isArray(jacks)) throw new Error("La recherche des connecteurs cachés a renvoyé un résultat illisible.");
   const seen = new Set<string>();
@@ -206,11 +205,11 @@ export async function findHiddenJacks(device: { moduleName: string | null; manuf
   for (const jack of jacks.slice(0, maxJacks)) {
     if (typeof jack !== "object" || jack === null) continue;
     const { label, direction, location } = jack as Record<string, unknown>;
-    if (typeof label !== "string" || !label.trim() || label.length > 40 || (direction !== "input" && direction !== "output")) continue;
+    if (typeof label !== "string" || !label.trim() || label.length > 40 || !isJackDirection(direction)) continue;
     const key = label.trim().toLowerCase();
     if (seen.has(key) || known.has(key)) continue;
     seen.add(key);
-    out.push({ label: label.trim(), direction, location: typeof location === "string" ? location.slice(0, 30) : "Non visible" });
+    out.push({ label: label.trim(), direction: jackDirection({ label, direction }), location: typeof location === "string" ? location.slice(0, 30) : "Non visible" });
   }
   return out;
 }

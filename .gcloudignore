@@ -1,0 +1,13 @@
+.git
+.env
+.env.*
+!.env.example
+node_modules
+dist
+server-dist
+android
+backup
+.DS_Store
+*.m4a
+*.jks
+*.keystore

@@ -1,0 +1,28 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Build Android local debug APK",
+			"type": "shell",
+			"command": "npm run build:mobile-local && JAVA_HOME='/Applications/Android Studio.app/Contents/jbr/Contents/Home' ./android/gradlew -p android assembleDebug",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Build Android cloud debug APK",
+			"type": "shell",
+			"command": "VITE_AI_SERVER_URL='' VITE_API_URL='https://analog-memory-65609223509.us-central1.run.app' npm run build && npm run cap:sync && JAVA_HOME='/Applications/Android Studio.app/Contents/jbr/Contents/Home' ./android/gradlew -p android assembleDebug",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Run local web with cloud API",
+			"type": "shell",
+			"command": "VITE_API_URL='https://analog-memory-65609223509.us-central1.run.app' VITE_AI_SERVER_URL='https://analog-memory-65609223509.us-central1.run.app' npm run dev -- --port 5173 --strictPort",
+			"isBackground": true,
+			"problemMatcher": []
+		}
+	]
+}
